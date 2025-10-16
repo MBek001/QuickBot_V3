@@ -1,27 +1,65 @@
+"""
+Configuration settings for the bot.
+"""
+
 import os
-from typing import List
 from dotenv import load_dotenv
 
-# === Load environment variables from .env file ===
-# It will look for a file named ".env" in the current working directory
 load_dotenv()
 
-# === Telegram and API keys ===
-TELEGRAM_TOKEN: str = os.getenv("BOT_TOKEN")  # Your bot token from BotFather
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+# ============================================================================
+# TELEGRAM CONFIGURATION
+# ============================================================================
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN", "")
+STORAGE_CHANNEL_ID = int(os.getenv("STORAGE_CHANNEL_ID", "0"))
 
-# === Database ===
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./bot.db")
+# ============================================================================
+# OPENAI CONFIGURATION
+# ============================================================================
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-# === Storage (Telegram channel ID for storing files) ===
-STORAGE_CHANNEL_ID = os.getenv("STORAGE_CHANNEL_ID")
+# Chat models
+PREMIUM_CHAT_MODEL = "gpt-4o"
+FREE_CHAT_MODEL = "gpt-4o-mini"
 
-# === Admin IDs ===
-_admin_ids_env: str = os.getenv("ADMIN_IDS", "")
-ADMIN_IDS: List[int] = [
-    int(x) for x in _admin_ids_env.split(",") if x.strip().isdigit()
+# Image model
+IMAGE_MODEL = "gpt-image-1"
+
+# Token limits
+PREMIUM_MAX_TOKENS = 2000
+FREE_MAX_TOKENS = 800
+
+# ============================================================================
+# ADMIN CONFIGURATION
+# ============================================================================
+ADMIN_IDS = [
+    int(x.strip())
+    for x in os.getenv("ADMIN_IDS", "").split(",")
+    if x.strip()
 ]
 
-# === Optional debug print ===
-if not TELEGRAM_TOKEN:
-    print("⚠️  BOT_TOKEN not found in environment variables or .env file!")
+# ============================================================================
+# QUOTA LIMITS (Daily)
+# ============================================================================
+# Free tier daily limits
+FREE_QUICK_CHAT = 20
+FREE_CODE_CHAT = 10
+FREE_CONVERT = 5
+FREE_PPTX = 2
+
+# Premium tier (unlimited)
+PREMIUM_QUICK_CHAT = 999999
+PREMIUM_CODE_CHAT = 999999
+PREMIUM_CONVERT = 999999
+PREMIUM_PPTX = 999999
+
+# ============================================================================
+# TRIAL SYSTEM
+# ============================================================================
+TRIAL_PERIOD_DAYS = 7
+TRIAL_USES_PER_PERIOD = 3
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot.db")

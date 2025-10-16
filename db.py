@@ -1,94 +1,253 @@
 """
-Database utilities for the Telegram AI assistant bot.
+Database connection and utility functions.
 
-This module centralises creation of the SQLAlchemy engine and session
-factory, exposes a convenience context manager `get_db` for acquiring
-sessions, and implements simple audit logging for admin actions.
+Provides session management, initialization, and common database operations.
 
-Any module that needs to access the database should import `get_db` from
-this module.  Use the context manager pattern to ensure sessions are
-closed properly:
-
-```
-from .db import get_db
-
-with get_db() as db:
-    # perform DB operations
-```
-
-Note that the database schema is created automatically on import.  If you
-add new models you should run the bot once to create the tables, or
-invoke `Base.metadata.create_all()` manually.
+FIXED FOR:
+- Windows emoji encoding issues
+- SQLAlchemy 2.0 text() requirements
 """
 
+import logging
 from contextlib import contextmanager
-from typing import Iterator, Optional, Dict, Any
+from typing import Optional
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 
 from config import DATABASE_URL
-from models import Base, ActionLog, User
-from models_enums import UserAction
+from models import Base, ActionLog
+from models_enums import UserAction, PlanCode
 
-# Create the SQLAlchemy engine.  Future=True enables 2.0 style usage.
-engine = create_engine(DATABASE_URL, echo=False, future=True)
+logger = logging.getLogger(__name__)
 
-# Session factory bound to the engine.  We disable autoflush to reduce
-# incidental writes during command processing.  Autocommit is false so
-# that we control transactions explicitly.
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+# ============================================================================
+# ENGINE CONFIGURATION (OPTIMIZED)
+# ============================================================================
 
-# Create all tables on module import.  This ensures that the database
-# schema is ready before any requests are handled.  If the database file
-# does not exist it will be created.  For production systems you may
-# wish to manage migrations with Alembic instead.
-Base.metadata.create_all(bind=engine)
+# Create engine with appropriate settings
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 20  # Increase timeout to 20 seconds
+    } if DATABASE_URL.startswith("sqlite") else {},
+    future=True,
+    echo=False,  # Set to True for SQL debugging
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=3600,  # Recycle connections after 1 hour
+)
 
+# Create session factory
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    expire_on_commit=False,
+    future=True
+)
+
+
+# ============================================================================
+# DATABASE INITIALIZATION
+# ============================================================================
+
+def init_db() -> None:
+    """
+    Initialize database schema and create default data.
+
+    Creates all tables and inserts default plans if they don't exist.
+    """
+    from models import Plan
+
+    logger.info("Initializing database...")
+
+    # Create all tables
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created")
+
+    # Create default plans
+    with get_db() as db:
+        # Free plan
+        free_plan = db.query(Plan).filter(Plan.code == PlanCode.free).first()
+        if not free_plan:
+            free_plan = Plan(
+                code=PlanCode.free,
+                title="Free Plan",
+                description="Basic features with daily limits",
+                daily_quick_chat=30,
+                daily_code_chat=10,
+                daily_convert=5,
+                daily_pptx=3,
+                max_file_mb=10,
+                priority=False,
+            )
+            db.add(free_plan)
+            logger.info("Created Free plan")
+
+        # Premium plan
+        premium_plan = db.query(Plan).filter(Plan.code == PlanCode.premium).first()
+        if not premium_plan:
+            premium_plan = Plan(
+                code=PlanCode.premium,
+                title="Premium Plan",
+                description="Unlimited access to all features",
+                daily_quick_chat=999999,
+                daily_code_chat=999999,
+                daily_convert=999999,
+                daily_pptx=999999,
+                max_file_mb=50,
+                priority=True,
+            )
+            db.add(premium_plan)
+            logger.info("Created Premium plan")
+
+    logger.info("Database initialization complete")
+
+
+# ============================================================================
+# SESSION MANAGEMENT
+# ============================================================================
 
 @contextmanager
-def get_db() -> Iterator[SessionLocal]:
-    """Provide a transactional scope around a series of operations.
+def get_db():
+    """
+    Context manager for database sessions.
 
-    Yields a SQLAlchemy session and ensures it is closed when
-    the context exits.  Any unhandled exceptions will cause the
-    transaction to roll back.
+    Usage:
+        with get_db() as db:
+            user = db.query(User).first()
+            # ... do work ...
 
-    Returns
-    -------
-    Iterator[Session]
-        A SQLAlchemy session object.
+    Automatically commits on success and rolls back on error.
     """
     db = SessionLocal()
     try:
         yield db
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
+        logger.error(f"Database error: {e}", exc_info=True)
         raise
     finally:
         db.close()
 
 
-def log_action(db: SessionLocal, user_id: Optional[int], action: UserAction,
-               meta: Optional[Dict[str, Any]] = None) -> None:
-    """Record a user or admin action in the audit log.
-
-    Parameters
-    ----------
-    db : Session
-        A SQLAlchemy session.
-    user_id : int or None
-        The ID of the acting user.  If unknown, None may be provided.
-    action : UserAction
-        An enum describing what happened.
-    meta : dict, optional
-        Additional metadata to store alongside the action.  This can
-        include arbitrary JSON serialisable data.
+def get_session() -> Session:
     """
-    # Guard against missing meta
-    if meta is None:
-        meta = {}
-    log_entry = ActionLog(user_id=user_id, action=action, meta=meta)
-    db.add(log_entry)
-    # Commit handled by context manager
+    Get a new database session.
+
+    Note: Caller is responsible for closing the session.
+    Use get_db() context manager when possible.
+    """
+    return SessionLocal()
+
+
+# ============================================================================
+# LOGGING HELPERS
+# ============================================================================
+
+def log_action(
+        db: Session,
+        user_id: int,
+        action: UserAction,
+        ref_id: Optional[int] = None,
+        meta: Optional[dict] = None
+) -> ActionLog:
+    """
+    Log a user action to the database.
+
+    Args:
+        db: Database session
+        user_id: ID of the user performing the action
+        action: Type of action being logged
+        ref_id: Optional reference ID (e.g., file ID, job ID)
+        meta: Optional metadata dictionary
+
+    Returns:
+        Created ActionLog instance
+    """
+    try:
+        log = ActionLog(
+            user_id=user_id,
+            action=action,
+            ref_id=ref_id,
+            meta=meta or {}
+        )
+        db.add(log)
+        db.flush()
+        return log
+    except Exception as e:
+        logger.error(f"Failed to log action {action} for user {user_id}: {e}")
+        # Don't raise - logging failure shouldn't break the app
+        return None
+
+
+# ============================================================================
+# CLEANUP UTILITIES
+# ============================================================================
+
+def cleanup_old_sessions(days: int = 30) -> int:
+    """
+    Remove chat sessions older than specified days.
+
+    Args:
+        days: Number of days of inactivity before cleanup
+
+    Returns:
+        Number of sessions deleted
+    """
+    from datetime import datetime, timedelta
+    from models import ChatSession
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with get_db() as db:
+        deleted = db.query(ChatSession).filter(
+            ChatSession.last_activity_at < cutoff
+        ).delete()
+        logger.info(f"Cleaned up {deleted} old chat sessions")
+        return deleted
+
+
+def cleanup_old_quotas(days: int = 90) -> int:
+    """
+    Remove quota records older than specified days.
+
+    Args:
+        days: Number of days to keep quota records
+
+    Returns:
+        Number of quota records deleted
+    """
+    from datetime import date, timedelta
+    from models import QuotaUsage
+
+    cutoff = date.today() - timedelta(days=days)
+
+    with get_db() as db:
+        deleted = db.query(QuotaUsage).filter(
+            QuotaUsage.usage_date < cutoff
+        ).delete()
+        logger.info(f"Cleaned up {deleted} old quota records")
+        return deleted
+
+
+# ============================================================================
+# DATABASE HEALTH CHECK (FIXED FOR SQLALCHEMY 2.0)
+# ============================================================================
+
+def check_db_health() -> bool:
+    """
+    Check if database connection is healthy.
+
+    Returns:
+        True if database is accessible, False otherwise
+    """
+    try:
+        with get_db() as db:
+            # FIXED: Use text() for raw SQL in SQLAlchemy 2.0
+            db.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        return False

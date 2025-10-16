@@ -1,74 +1,72 @@
 """
-Enumeration types used by the bot's SQLAlchemy models.
+Enumeration types used throughout the application.
 
-These enums mirror business logic concepts such as plan codes, language
-choices, file categories and job statuses.  Defining them centrally
-ensures that columns using Enum(...) remain consistent across the
-application.
+These enums provide type safety and consistency for database models
+and application logic.
 """
 
 from enum import Enum
 
 
 class PlanCode(str, Enum):
-    """Subscription plans for end users."""
+    """User subscription plan types."""
     free = "free"
     premium = "premium"
 
 
 class Language(str, Enum):
-    """Supported user interface languages."""
-    uz = "uz"
-    ru = "ru"
-    en = "en"
+    """Supported interface languages."""
+    en = "en"  # English
+    ru = "ru"  # Russian
+    uz = "uz"  # Uzbek
 
+
+from enum import Enum
 
 class FileCategory(str, Enum):
-    """High level classification of files stored by the bot."""
-    other = "other"
-    image = "image"
+    image_gen = "image_gen"
+    image_edit = "image_edit"
     pptx = "pptx"
-    pdf = "pdf"
-    docx = "docx"
+    document = "document"
+    audio = "audio"
+    video = "video"
+    other = "other"
 
 
 class FileJobKind(str, Enum):
-    """Kinds of processing jobs that can be queued for files."""
-    convert = "convert"
-    pptx = "pptx"
-    analysis = "analysis"
+    """Types of file processing jobs."""
+    unknown = "unknown"
+    image_generation = "image_generation"
+    image_editing = "image_editing"
+    pptx_creation = "pptx_creation"
 
 
 class JobStatus(str, Enum):
-    """Lifecycle states for file processing jobs."""
+    """Status of file processing jobs."""
     pending = "pending"
     running = "running"
-    finished = "finished"
+    done = "done"
     failed = "failed"
 
 
 class ChatMode(str, Enum):
-    """Different chat contexts for user conversations."""
-    quick = "quick"
-    code = "code"
-    image = "image"
+    """Chat interaction modes."""
+    normal = "normal"
+    image_edit = "image_edit"
+    image_gen = "image_gen"
+    pptx = "pptx"
 
 
 class UserAction(str, Enum):
-    """Enumeration of actions taken by users and admins.
-
-    Logged into the `action_logs` table to provide an audit trail.
-    """
-    profile_view = "profile_view"
-    grant_premium = "grant_premium"
-    revoke_premium = "revoke_premium"
-    make_admin = "make_admin"
-    remove_admin = "remove_admin"
-    block_user = "block_user"
-    unblock_user = "unblock_user"
-    broadcast = "broadcast"
+    """Types of user actions logged in the system."""
     chat = "chat"
+    file_upload = "file_upload"
+    file_download = "file_download"
+    conversion = "conversion"
     image_generation = "image_generation"
-    image_analysis = "image_analysis"
+    image_edit = "image_edit"
     pptx_creation = "pptx_creation"
-    convert = "convert"
+    trial_reset = "trial_reset"
+    profile_view = "profile_view"
+    language_change = "language_change"
+    phone_added = "phone_added"
